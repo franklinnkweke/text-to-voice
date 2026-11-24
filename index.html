@@ -1,0 +1,1213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text to Voice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Mono:wght@400;500&family=Atkinson+Hyperlegible+Next:ital,wght@0,400;0,600;0,700;1,400&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+:root {
+  /* Layout: the text is the stage (left), voice + speed + save sit in a side rail, a transport bar is pinned to the bottom. The sentence being read gets a highlighter-pen mark. */
+  --paper: #f5f6f3;
+  --card: #ffffff;
+  --ink: #16181d;
+  --muted: #646a74;
+  --line: #e0e2dc;
+  --accent: #2443e6;
+  --accent-ink: #ffffff;
+  --mark: #ffe17a;
+  --mark-ink: #16181d;
+  --bar: #16181d;
+  --bar-ink: #f3f4f1;
+  --bar-muted: #9aa0aa;
+  --bad: #b3261e;
+  --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  --font-body: "Atkinson Hyperlegible Next", "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r: 14px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #101216; --card: #171a20; --ink: #eceef0; --muted: #98a0ac; --line: #282c35;
+    --accent: #7f93ff; --accent-ink: #0d1020; --mark: #5c4d12; --mark-ink: #fff4c7;
+    --bar: #1f232b; --bar-ink: #eceef0; --bar-muted: #98a0ac; --bad: #ff8a80;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #101216; --card: #171a20; --ink: #eceef0; --muted: #98a0ac; --line: #282c35;
+  --accent: #7f93ff; --accent-ink: #0d1020; --mark: #5c4d12; --mark-ink: #fff4c7;
+  --bar: #1f232b; --bar-ink: #eceef0; --bar-muted: #98a0ac; --bad: #ff8a80;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--paper); color: var(--ink);
+  font-family: var(--font-body); font-size: 16px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.app {
+  min-height: 100%;
+  display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr);
+  max-width: 1180px; margin: 0 auto; padding: 20px 20px 0;
+  gap: 18px;
+}
+
+/* ---------- header ---------- */
+header { display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+h1 {
+  font-family: var(--font-display); font-weight: 400; font-size: clamp(38px, 6vw, 58px);
+  line-height: .95; margin: 0; letter-spacing: -.01em; text-wrap: balance;
+}
+h1 em {
+  font-style: italic; padding: 0 .12em; margin: 0 -.04em;
+  background: linear-gradient(transparent 52%, var(--mark) 52%, var(--mark) 92%, transparent 92%);
+  color: inherit;
+}
+.tagline { margin: 6px 0 0; color: var(--muted); }
+.stats { font-family: var(--font-mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.stats b { color: var(--ink); font-weight: 500; }
+
+/* ---------- main grid ---------- */
+main { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 18px; align-items: start; min-height: 0; }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+
+.panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); min-width: 0; }
+.stats .sep { display: none; }
+
+/* the stage: text box / reading view */
+.stage { display: flex; flex-direction: column; min-height: 420px; }
+.stage-tools {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 12px; border-bottom: 1px solid var(--line);
+}
+.stage-tools .spacer { flex: 1; }
+.chip-btn {
+  border: 1px solid var(--line); background: transparent; border-radius: 999px;
+  padding: 6px 12px; font-size: 14px; display: inline-flex; align-items: center; gap: 6px;
+}
+.chip-btn:hover { border-color: var(--muted); }
+.chip-btn svg { width: 16px; height: 16px; }
+.hint { font-size: 13px; color: var(--muted); }
+
+#text {
+  flex: 1; width: 100%; min-height: 380px; resize: vertical;
+  border: 0; background: transparent; padding: 20px 22px;
+  font-size: 18px; line-height: 1.65; outline: none;
+}
+#text::placeholder { color: var(--muted); }
+#reader {
+  flex: 1; padding: 20px 22px; font-size: 18px; line-height: 1.75;
+  overflow-y: auto; max-height: min(64vh, 720px); min-height: 380px;
+}
+#reader p { margin: 0 0 1em; max-width: 68ch; }
+#reader p.done, #reader .part.done { color: var(--muted); }
+#reader .part { cursor: pointer; border-radius: 4px; transition: background-color .2s; }
+#reader .part:hover { background: color-mix(in srgb, var(--mark) 35%, transparent); }
+#reader .part.now, #reader p.now {
+  background: var(--mark); color: var(--mark-ink);
+  box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  padding: .06em .15em; margin: 0 -.15em;
+}
+#reader p.now { padding: .2em .4em; margin: 0 -.4em 1em; border-radius: 6px; }
+[hidden] { display: none !important; }
+
+/* side rail */
+.rail { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.rail section { padding: 14px 16px; }
+.rail h2 {
+  font-family: var(--font-mono); font-weight: 500; font-size: 12px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); margin: 0 0 4px;
+}
+.rail .note { font-size: 13px; color: var(--muted); margin: 0 0 8px; line-height: 1.4; }
+.group + .group { margin-top: 12px; }
+.voices { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.voice { position: relative; }
+.voice input { position: absolute; opacity: 0; pointer-events: none; }
+.voice label {
+  display: grid; gap: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px;
+  cursor: pointer; min-height: 46px; align-content: center; transition: border-color .15s, background .15s;
+}
+.voice label:hover { border-color: var(--muted); }
+.voice .vn { font-weight: 600; font-size: 14.5px; line-height: 1.3; }
+.voice .vd { font-size: 12px; color: var(--muted); line-height: 1.3; }
+.voice input:checked + label { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: inset 0 0 0 1px var(--accent); }
+.voice input:focus-visible + label { outline: 3px solid var(--accent); outline-offset: 2px; }
+.voice input:disabled + label { opacity: .45; cursor: not-allowed; }
+
+.speed-row { display: flex; align-items: center; gap: 12px; }
+#speed { flex: 1; accent-color: var(--accent); }
+#speed-val { font-family: var(--font-mono); font-variant-numeric: tabular-nums; min-width: 3.5ch; text-align: right; font-weight: 500; }
+.ticks { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-top: 2px; padding-right: calc(3.5ch + 12px); }
+
+.btn {
+  border: 0; border-radius: 10px; padding: 11px 16px; font-weight: 600;
+  background: var(--accent); color: var(--accent-ink); display: inline-flex; gap: 8px; align-items: center; justify-content: center;
+}
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn svg { width: 18px; height: 18px; }
+.save-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.save-actions .btn { flex: 1; }
+.meterline { height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; margin: 10px 0 6px; }
+.meterline > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.save-status { font-size: 13.5px; color: var(--muted); min-height: 1.4em; margin: 8px 0 0; }
+.save-status.bad, .status.bad { color: var(--bad); }
+#save-audio { width: 100%; margin-top: 10px; }
+
+/* ---------- transport bar ---------- */
+.transport {
+  position: sticky; bottom: 0; z-index: 5;
+  margin: 0 -20px; padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--paper) 70%, transparent);
+}
+.bar {
+  background: var(--bar); color: var(--bar-ink); border-radius: 18px;
+  display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 14px; align-items: center;
+  padding: 10px 16px 10px 10px;
+  box-shadow: 0 10px 30px -12px rgba(0,0,0,.45);
+}
+.play {
+  width: 58px; height: 58px; border-radius: 50%; border: 0;
+  background: var(--accent); color: var(--accent-ink); display: grid; place-items: center;
+}
+.play svg { width: 26px; height: 26px; }
+.play:disabled { opacity: .5; }
+.stop {
+  width: 40px; height: 40px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--bar-ink) 25%, transparent);
+  background: transparent; color: var(--bar-ink); display: grid; place-items: center;
+}
+.stop svg { width: 16px; height: 16px; }
+.stop:disabled { opacity: .35; cursor: default; }
+.now-playing { min-width: 0; }
+.status { font-size: 15px; overflow-wrap: anywhere; }
+.status.bad { color: #ffb4ab; }
+.sub { font-family: var(--font-mono); font-size: 12px; color: var(--bar-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.restart {
+  border: 0; background: transparent; color: var(--bar-ink); padding: 2px 0; margin-left: 10px;
+  font: inherit; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
+.restart:hover { color: var(--mark); }
+.track { height: 4px; border-radius: 99px; background: color-mix(in srgb, var(--bar-ink) 18%, transparent); margin-top: 7px; overflow: hidden; }
+.track > i { display: block; height: 100%; width: 0; background: var(--bar-ink); transition: width .3s linear; }
+.track.loading > i { background: var(--mark); }
+.meter { display: flex; align-items: center; gap: 3px; height: 30px; width: 34px; }
+.meter i { flex: 1; height: 4px; border-radius: 2px; background: var(--bar-muted); transition: height .08s; }
+.meter.live i { background: var(--mark); }
+.meter.pulse i { animation: pulse 1s ease-in-out infinite; background: var(--mark); }
+.meter.pulse i:nth-child(2) { animation-delay: -.6s; } .meter.pulse i:nth-child(3) { animation-delay: -.2s; }
+.meter.pulse i:nth-child(4) { animation-delay: -.8s; } .meter.pulse i:nth-child(5) { animation-delay: -.4s; }
+@keyframes pulse { 0%,100% { height: 5px; } 50% { height: 24px; } }
+@media (prefers-reduced-motion: reduce) {
+  .meter.pulse i { animation: none; height: 14px; }
+  .track > i, .meterline > i, #reader .part { transition: none; }
+}
+/* phones: text first, voices in swipeable rows, player pinned to the bottom with big touch targets */
+@media (max-width: 600px) {
+  .app { padding: 12px 12px 0; gap: 12px; }
+  header { gap: 2px; }
+  h1 { font-size: 40px; }
+  .tagline { font-size: 15px; margin-top: 4px; }
+  .stats { text-align: left; width: 100%; }
+  .stats br { display: none; }
+  .stats .sep { display: inline; }
+  main { gap: 12px; }
+  .stage { min-height: 0; }
+  .stage-tools { padding: 8px 10px; gap: 6px; }
+  .chip-btn { padding: 8px 12px; min-height: 40px; }
+  #text { min-height: 36vh; font-size: 17px; line-height: 1.6; padding: 14px 16px; }
+  #reader { min-height: 36vh; max-height: 54vh; font-size: 17px; line-height: 1.7; padding: 14px 16px; }
+  .rail { gap: 12px; }
+  .rail section { padding: 12px 14px; }
+  .voices {
+    display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity; scrollbar-width: none;
+    margin: 0 -14px; padding: 2px 14px 6px; scroll-padding: 0 14px;
+  }
+  .voices::-webkit-scrollbar { display: none; }
+  .voice { flex: 0 0 auto; scroll-snap-align: start; }
+  .voice label { min-width: 132px; min-height: 52px; }
+  .btn { min-height: 48px; }
+  .transport { margin: 0 -12px; padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .bar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; padding: 8px 10px 8px 8px; border-radius: 16px; }
+  .play { width: 54px; height: 54px; }
+  .now-playing { order: 2; }
+  .stop { order: 3; width: 46px; height: 46px; }
+  .meter { display: none; }
+  .status { font-size: 14.5px; }
+}
+@media (pointer: coarse) { #stage-hint.kbd { display: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>Text to <em>Voice</em></h1>
+      <p class="tagline">Paste your text, pick a voice, press play.</p>
+    </div>
+    <div class="stats" id="stats" aria-live="polite"></div>
+  </header>
+
+  <main>
+    <section class="panel stage" aria-label="Your text">
+      <div class="stage-tools">
+        <button class="chip-btn" id="clear" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>Clear
+        </button>
+        <label class="chip-btn" for="file-in" id="file-chip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>Open .txt file
+        </label>
+        <input type="file" id="file-in" class="sr" accept=".txt,.md,.text,text/plain">
+        <button class="chip-btn" id="edit" type="button" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>Edit text
+        </button>
+        <span class="spacer"></span>
+        <span class="hint kbd" id="stage-hint">Tip: press Ctrl + Enter to play</span>
+      </div>
+      <label for="text" class="sr">Text to read aloud</label>
+      <textarea id="text" spellcheck="true" placeholder="Paste or type your text here."></textarea>
+      <div id="reader" hidden aria-live="off"></div>
+    </section>
+
+    <aside class="rail">
+      <section class="panel" aria-labelledby="voice-h">
+        <h2 id="voice-h">Voice</h2>
+        <div class="group" id="instant-group" hidden>
+          <p class="note"><b>Instant</b> · starts straight away, but stops if you switch pages</p>
+          <div class="voices" id="instant-voices" role="radiogroup" aria-label="Instant voices"></div>
+        </div>
+        <div class="group">
+          <p class="note"><b>Natural</b> · keeps playing in the background, can be saved</p>
+          <div class="voices" id="natural-voices" role="radiogroup" aria-label="Natural voices"></div>
+          <p class="note" id="pack-note" style="margin:8px 0 0">First use downloads a 97 MB voice pack, once.</p>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="speed-h">
+        <h2 id="speed-h">Speed</h2>
+        <div class="speed-row">
+          <input type="range" id="speed" min="0.7" max="1.5" step="0.1" value="1" aria-describedby="speed-val">
+          <output id="speed-val" for="speed">1.0×</output>
+        </div>
+        <div class="ticks" aria-hidden="true"><span>Slower</span><span>Faster</span></div>
+      </section>
+
+      <section class="panel" aria-labelledby="save-h">
+        <h2 id="save-h">Save as audio</h2>
+        <p class="note" id="save-note">Makes an audio file of the whole text.</p>
+        <div class="save-actions">
+          <button class="btn" id="make" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+            <span id="make-label">Make audio file</span>
+          </button>
+          <button class="btn ghost" id="make-cancel" type="button" hidden>Cancel</button>
+        </div>
+        <div class="meterline" id="save-bar" hidden><i></i></div>
+        <p class="save-status" id="save-status" role="status"></p>
+        <audio id="save-audio" controls hidden></audio>
+        <div class="save-actions" id="save-again-row" hidden style="margin-top:8px">
+          <button class="btn ghost" id="save-again" type="button">Save file again</button>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <div class="transport">
+    <div class="bar" role="group" aria-label="Player">
+      <button class="play" id="play" type="button" aria-label="Play">
+        <svg id="ico-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>
+        <svg id="ico-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden><rect x="6" y="4" width="4.5" height="16" rx="1.2"/><rect x="13.5" y="4" width="4.5" height="16" rx="1.2"/></svg>
+      </button>
+      <button class="stop" id="stop" type="button" aria-label="Stop" disabled>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>
+      </button>
+      <div class="now-playing">
+        <div class="status" id="status" role="status">Ready. Press play.</div>
+        <div class="sub"><span id="sub"></span><button class="restart" id="restart" type="button" hidden>Start over</button></div>
+        <div class="track" id="track"><i></i></div>
+      </div>
+      <div class="meter" id="meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+    </div>
+  </div>
+</div>
+
+<script src="engine/mp4-muxer.js"></script>
+<script src="engine/webm-muxer.js"></script>
+<script type="module">
+import { VOICES, SAMPLE_RATE, planReading } from "./engine/text.js";
+
+/* ---------------- small helpers ---------------- */
+const $ = (s) => document.querySelector(s);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("ttv:" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("ttv:" + k, JSON.stringify(v)); } catch {} },
+};
+const fmtTime = (sec) => {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return `${sec} s`;
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return s ? `${m} min ${s} s` : `${m} min`;
+};
+const fmtMB = (b) => (b / 1e6).toFixed(b < 1e7 ? 1 : 0) + " MB";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const TOUCH = matchMedia("(pointer: coarse)").matches;
+const PHONE = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (TOUCH && matchMedia("(max-width: 600px)").matches);
+
+const CLAUDE_VOICES = [
+  { id: "buttery", name: "Buttery", note: "Warm" },
+  { id: "airy", name: "Airy", note: "Light" },
+  { id: "glassy", name: "Glassy", note: "Crisp" },
+  { id: "rounded", name: "Rounded", note: "Soft" },
+];
+const EXAMPLE = `This is example text. Replace it with anything you want to hear: an article, an email, a report or your study notes.
+
+Press play and the voice reads it out loud, highlighting each sentence as it goes. Tap or click any sentence to jump straight to it.
+
+The natural voices run on your own device, so you can save what you hear as an audio file and play it later on your phone, in the car or on a walk.`;
+
+/* ---------------- elements + state ---------------- */
+const el = {
+  text: $("#text"), reader: $("#reader"), fileChip: $("#file-chip"), edit: $("#edit"), clear: $("#clear"), file: $("#file-in"), hint: $("#stage-hint"),
+  stats: $("#stats"), play: $("#play"), stop: $("#stop"), icoPlay: $("#ico-play"), icoPause: $("#ico-pause"),
+  status: $("#status"), sub: $("#sub"), restart: $("#restart"), track: $("#track"), meter: $("#meter"),
+  speed: $("#speed"), speedVal: $("#speed-val"),
+  instantGroup: $("#instant-group"), instantVoices: $("#instant-voices"), naturalVoices: $("#natural-voices"), packNote: $("#pack-note"),
+  make: $("#make"), makeLabel: $("#make-label"), makeCancel: $("#make-cancel"), saveNote: $("#save-note"),
+  saveBar: $("#save-bar"), saveStatus: $("#save-status"), saveAudio: $("#save-audio"), saveAgainRow: $("#save-again-row"), saveAgain: $("#save-again"),
+};
+const state = {
+  voice: store.get("voice", null),            // "c:buttery" | "n:af_heart"
+  lastNatural: store.get("lastNatural", "af_heart"),
+  speed: Number(store.get("speed", 1)) || 1,
+  session: null,
+  tts: null, downloads: null, ttsChecked: false,
+};
+el.text.value = store.get("text", null) ?? EXAMPLE;
+
+/* where reading stopped, kept per text so play carries on from there */
+function textKey(t) { let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0; return `${t.length}:${h}`; }
+state.resume = store.get("resume", null);
+function validResume() { const r = state.resume; return r && r.key === textKey(getText()) ? r : null; }
+function clearResume() { state.resume = null; store.set("resume", null); el.restart.hidden = true; }
+function setResume(pos) {
+  const t = getText(); if (!t || !pos) return null;
+  const parts = flatten(planReading(t));
+  let part = pos.part ?? parts.findIndex((p) => p.pi === pos.para);
+  if (!(part > 0 && part < parts.length)) { clearResume(); return null; }
+  state.resume = { key: textKey(t), part, total: parts.length };
+  store.set("resume", state.resume); el.restart.hidden = false;
+  return state.resume;
+}
+const resumeText = (r) => `Stopped at sentence ${r.part + 1} of ${r.total}. Press play to carry on.`;
+
+/* ---------------- voices UI ---------------- */
+function voiceRadio(container, value, name, desc) {
+  const id = "v-" + value.replace(":", "-");
+  const wrap = document.createElement("div");
+  wrap.className = "voice";
+  wrap.innerHTML = `<input type="radio" name="voice" id="${id}" value="${value}"><label for="${id}"><span class="vn"></span><span class="vd"></span></label>`;
+  wrap.querySelector(".vn").textContent = name;
+  wrap.querySelector(".vd").textContent = desc;
+  container.appendChild(wrap);
+}
+VOICES.forEach((v) => voiceRadio(el.naturalVoices, "n:" + v.id, v.name, `${v.accent} ${v.gender}`));
+CLAUDE_VOICES.forEach((v) => voiceRadio(el.instantVoices, "c:" + v.id, v.name, v.note));
+
+function currentVoice() {
+  let v = state.voice;
+  if (!v || (v.startsWith("c:") && !state.tts)) v = "n:" + state.lastNatural;
+  return v;
+}
+function naturalForSave() {
+  const v = currentVoice();
+  return v.startsWith("n:") ? v.slice(2) : state.lastNatural;
+}
+function syncVoiceUI() {
+  const v = currentVoice();
+  const r = document.querySelector(`input[name="voice"][value="${v}"]`);
+  if (r) {
+    r.checked = true;
+    const row = r.closest(".voices"), card = r.closest(".voice");
+    if (row && row.scrollWidth > row.clientWidth) {
+      const a = card.getBoundingClientRect(), b = row.getBoundingClientRect();
+      if (a.left < b.left || a.right > b.right) row.scrollLeft += a.left - b.left - 14;
+    }
+  }
+  const nv = VOICES.find((x) => x.id === naturalForSave());
+  el.saveNote.textContent = `Makes an audio file of the whole text, read by ${nv.name} (${nv.accent} ${nv.gender}).`;
+}
+document.addEventListener("change", (e) => {
+  if (e.target.name !== "voice") return;
+  const v = e.target.value;
+  state.voice = v; store.set("voice", v);
+  if (v.startsWith("n:")) { state.lastNatural = v.slice(2); store.set("lastNatural", state.lastNatural); }
+  syncVoiceUI();
+  if (v.startsWith("n:")) Engine.warm();
+  // switching voice while reading: carry on from the current spot with the new voice
+  if (state.session && !state.session.ended) {
+    startReading(state.session.position());
+  }
+});
+
+/* ---------------- speed ---------------- */
+function syncSpeed() {
+  el.speed.value = state.speed;
+  el.speedVal.textContent = state.speed.toFixed(1) + "×";
+  updateStats();
+}
+let speedTimer = 0;
+el.speed.addEventListener("input", () => {
+  state.speed = Math.round(Number(el.speed.value) * 10) / 10;
+  store.set("speed", state.speed);
+  syncSpeed();
+  const s = state.session;
+  if (s && !s.ended) {
+    if (s.kind === "claude") s.setRate(state.speed);
+    else { clearTimeout(speedTimer); speedTimer = setTimeout(() => { if (state.session === s && !s.ended) startReading(s.position()); }, 350); }
+  }
+});
+
+/* ---------------- text stats + storage ---------------- */
+function getText() { return el.text.value.trim(); }
+function updateStats() {
+  const t = getText();
+  const words = t ? t.split(/\s+/).length : 0;
+  const secs = words / (160 * state.speed) * 60;
+  el.stats.innerHTML = words
+    ? `<b>${words.toLocaleString()}</b> words<br><span class="sep"> · </span>about <b>${fmtTime(secs)}</b> to listen`
+    : "No text yet";
+}
+let saveTimer = 0;
+el.text.addEventListener("input", () => {
+  updateStats();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => store.set("text", el.text.value), 400);
+  if (state.resume) clearResume();
+  resetSaved();
+});
+el.clear.addEventListener("click", () => {
+  stopReading();
+  el.text.value = ""; store.set("text", ""); updateStats(); resetSaved(); clearResume();
+  el.text.focus();
+  setStatus("Paste your text, then press play.");
+});
+el.file.addEventListener("change", async () => {
+  const f = el.file.files[0]; if (!f) return;
+  stopReading();
+  try { el.text.value = await f.text(); } catch { setStatus("That file could not be opened. Try a plain .txt file.", true); return; }
+  store.set("text", el.text.value); updateStats(); resetSaved(); clearResume();
+  setStatus(`Opened ${f.name}. Press play.`);
+  el.file.value = "";
+});
+el.edit.addEventListener("click", () => { stopReading(); el.text.focus(); });
+el.text.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); el.play.click(); }
+});
+
+/* ---------------- player bar ---------------- */
+function setStatus(msg, bad = false) { el.status.textContent = msg; el.status.classList.toggle("bad", bad); }
+function setSub(msg) { el.sub.textContent = msg || ""; }
+function setTrack(frac, loading = false) {
+  el.track.classList.toggle("loading", loading);
+  el.track.firstElementChild.style.width = `${Math.max(0, Math.min(1, frac)) * 100}%`;
+}
+function setPlayIcon(playing) {
+  el.icoPlay.toggleAttribute("hidden", playing); el.icoPause.toggleAttribute("hidden", !playing);
+  el.play.setAttribute("aria-label", playing ? "Pause" : "Play");
+}
+function setMeter(mode, levels) {
+  el.meter.classList.toggle("pulse", mode === "pulse");
+  el.meter.classList.toggle("live", mode === "live");
+  const bars = el.meter.children;
+  for (let i = 0; i < bars.length; i++) bars[i].style.height = mode === "live" && levels ? `${4 + levels[i] * 22}px` : "";
+}
+
+/* reading view */
+function showReader(plan, kind) {
+  el.reader.innerHTML = "";
+  let k = 0;
+  plan.forEach((p, pi) => {
+    const para = document.createElement("p");
+    para.dataset.pi = pi;
+    p.parts.forEach((t, si) => {
+      const span = document.createElement("span");
+      span.className = "part"; span.dataset.k = k++; span.textContent = t;
+      para.appendChild(span);
+      if (si < p.parts.length - 1) para.appendChild(document.createTextNode(" "));
+    });
+    el.reader.appendChild(para);
+  });
+  el.reader.dataset.kind = kind;
+  el.text.hidden = true; el.reader.hidden = false;
+  el.edit.hidden = false; el.clear.hidden = true; el.fileChip.hidden = true;
+  el.hint.textContent = `${TOUCH ? "Tap" : "Click"} a sentence to jump to it`; el.hint.classList.remove("kbd");
+}
+function hideReader() {
+  el.reader.hidden = true; el.text.hidden = false;
+  el.edit.hidden = true; el.clear.hidden = false; el.fileChip.hidden = false;
+  el.hint.textContent = "Tip: press Ctrl + Enter to play"; el.hint.classList.add("kbd");
+}
+let lastMarked = null;
+function markPart(k, byPara = false) {
+  const node = byPara ? el.reader.querySelector(`p[data-pi="${k}"]`) : el.reader.querySelector(`.part[data-k="${k}"]`);
+  if (!node || node === lastMarked) return;
+  lastMarked?.classList.remove("now");
+  // dim what has been read
+  if (byPara) el.reader.querySelectorAll("p").forEach((p) => p.classList.toggle("done", Number(p.dataset.pi) < k));
+  else el.reader.querySelectorAll(".part").forEach((s) => s.classList.toggle("done", Number(s.dataset.k) < k));
+  node.classList.add("now");
+  lastMarked = node;
+  const box = el.reader.getBoundingClientRect(), r = node.getBoundingClientRect();
+  if (r.top < box.top + 40 || r.bottom > box.bottom - 40) {
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.reader.scrollTo({ top: el.reader.scrollTop + (r.top - box.top) - box.height / 3, behavior: reduce ? "auto" : "smooth" });
+  }
+}
+el.reader.addEventListener("click", (e) => {
+  const span = e.target.closest(".part");
+  if (!span || !state.session) return;
+  startReading({ part: Number(span.dataset.k) });
+});
+
+/* ---------------- the on-device natural voice engine ---------------- */
+const PACK = {
+  parts: ["model/kokoro.part0.data.wasm", "model/kokoro.part1.data.wasm", "model/kokoro.part2.data.wasm", "model/kokoro.part3.data.wasm", "model/kokoro.part4.data.wasm"],
+  partBytes: [19000000, 19000000, 19000000, 19000000, 16361271],
+  voices: "model/voices.data.wasm", voicesBytes: 4177920,
+};
+const PACK_TOTAL = PACK.partBytes.reduce((a, b) => a + b, 0) + PACK.voicesBytes;
+if (PHONE) el.packNote.textContent = "First use downloads a 97 MB voice pack, once. Wi-Fi is best.";
+const CACHE_NAME = "ttv-voice-pack-v1";
+
+const Engine = (() => {
+  let loadPromise = null, workers = [], nextId = 1, loaded = false;
+  const jobs = new Map();       // id -> {resolve, reject, owners:Set, key, worker}
+  const inflight = new Map();   // key -> id
+  const cache = new Map();      // key -> Float32Array
+  let backlog = [];
+  const listeners = new Set();  // progress listeners
+  let progress = { phase: "idle", frac: 0 };
+  const emit = (p) => { progress = p; listeners.forEach((f) => f(p)); };
+
+  async function fetchFile(url, onBytes) {
+    const abs = new URL(url, document.baseURI).href;
+    let c = null;
+    try { c = await caches.open(CACHE_NAME); const hit = await c.match(abs); if (hit) { const b = await hit.arrayBuffer(); onBytes(b.byteLength); return b; } } catch { c = null; }
+    const res = await fetch(abs);
+    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    let buf;
+    if (res.body && res.body.getReader) {
+      const reader = res.body.getReader(); const chunks = []; let n = 0;
+      for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); n += value.length; onBytes(value.length); }
+      const out = new Uint8Array(n); let o = 0; for (const ch of chunks) { out.set(ch, o); o += ch.length; }
+      buf = out.buffer;
+    } else { buf = await res.arrayBuffer(); onBytes(buf.byteLength); }
+    if (c) { try { await c.put(abs, new Response(new Blob([buf]))); } catch {} }
+    return buf;
+  }
+
+  async function isCached() {
+    try {
+      const c = await caches.open(CACHE_NAME);
+      for (const u of [...PACK.parts, PACK.voices]) if (!(await c.match(new URL(u, document.baseURI).href))) return false;
+      return true;
+    } catch { return false; }
+  }
+
+  function workerCount() {
+    if (self.crossOriginIsolated) return 1;
+    const hc = navigator.hardwareConcurrency || 2;
+    const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    const mem = navigator.deviceMemory || 8;
+    if (mobile || mem < 4 || hc < 4) return 1;
+    return hc >= 8 && mem >= 8 ? 3 : 2;
+  }
+
+  function load() {
+    if (loadPromise) return loadPromise;
+    loadPromise = (async () => {
+      let got = 0;
+      emit({ phase: "download", frac: 0 });
+      const onBytes = (n) => { got += n; emit({ phase: "download", frac: got / PACK_TOTAL, got }); };
+      const [voices, ...parts] = await Promise.all([fetchFile(PACK.voices, onBytes), ...PACK.parts.map((u) => fetchFile(u, onBytes))]);
+      const size = parts.reduce((a, b) => a + b.byteLength, 0);
+      const model = new Uint8Array(size); let o = 0;
+      for (const p of parts) { model.set(new Uint8Array(p), o); o += p.byteLength; }
+      emit({ phase: "start", frac: 1 });
+      const n = workerCount();
+      let firstReady, firstFail;
+      const ready = new Promise((res, rej) => { firstReady = res; firstFail = rej; });
+      let failures = 0;
+      for (let i = 0; i < n; i++) {
+        const w = new Worker(new URL("engine/worker.js", document.baseURI), { type: "module" });
+        const rec = { w, ready: false, pending: 0 };
+        w.onmessage = (e) => onWorkerMessage(rec, e.data, () => { rec.ready = true; workers.push(rec); firstReady(); flushBacklog(); }, (msg) => { failures++; if (failures === n) firstFail(new Error(msg)); });
+        w.onerror = (e) => { e.preventDefault?.(); if (!rec.ready) { failures++; if (failures === n) firstFail(new Error(e.message || "The voice engine could not start.")); } };
+        const last = i === n - 1;
+        const m = last ? model.buffer : model.buffer.slice(0);
+        const v = voices.slice(0);
+        w.postMessage({ type: "init", model: m, voices: v }, last ? [m, v] : [v]);
+      }
+      await ready;
+      loaded = true;
+      emit({ phase: "ready", frac: 1 });
+    })().catch((err) => { loadPromise = null; emit({ phase: "error", frac: 0, error: err }); throw err; });
+    return loadPromise;
+  }
+
+  function onWorkerMessage(rec, m, onReady, onFail) {
+    if (m.type === "ready") return onReady();
+    if (m.type === "init-error") { rec.w.terminate(); return onFail(m.message); }
+    const job = jobs.get(m.id);
+    if (!job) return;
+    rec.pending = Math.max(0, rec.pending - 1);
+    jobs.delete(m.id); inflight.delete(job.key);
+    if (m.type === "audio") { cache.set(job.key, m.audio); job.resolve(m.audio); }
+    else job.reject(new Error(m.message));
+    pump();
+  }
+
+  // hand jobs to workers a couple at a time, so a worker that starts late still gets a share
+  function pump() {
+    for (;;) {
+      backlog = backlog.filter((id) => jobs.has(id));
+      if (!backlog.length) return;
+      const free = workers.filter((w) => w.ready && w.pending < 2);
+      if (!free.length) return;
+      const w = free.reduce((a, b) => (b.pending < a.pending ? b : a));
+      // playing comes before saving
+      let pick = backlog.findIndex((id) => jobs.get(id).priority === 0);
+      if (pick < 0) pick = 0;
+      const id = backlog.splice(pick, 1)[0], job = jobs.get(id);
+      w.pending++; job.worker = w;
+      w.w.postMessage({ type: "gen", id, text: job.text, voice: job.voice, lang: job.lang, speed: job.speed });
+    }
+  }
+  function flushBacklog() { pump(); }
+
+  // get audio for one piece of text; shares work between player and saver
+  function get(text, voiceId, speed, owner, priority = 0) {
+    const key = `${voiceId}|${speed}|${text}`;
+    if (cache.has(key)) return Promise.resolve(cache.get(key));
+    const existing = inflight.get(key);
+    if (existing && jobs.has(existing)) { const j = jobs.get(existing); j.owners.add(owner); j.priority = Math.min(j.priority, priority); return j.promise; }
+    const id = nextId++;
+    const voice = VOICES.findIndex((v) => v.id === voiceId);
+    const job = { text, voice, lang: voiceId[0], speed, key, priority, owners: new Set([owner]) };
+    job.promise = new Promise((res, rej) => { job.resolve = res; job.reject = rej; });
+    jobs.set(id, job); inflight.set(key, id);
+    backlog.push(id); pump();
+    return job.promise;
+  }
+
+  // stop work that nobody else needs
+  function cancel(owner) {
+    const byWorker = new Map();
+    for (const [id, job] of jobs) {
+      if (!job.owners.delete(owner) || job.owners.size) continue;
+      jobs.delete(id); inflight.delete(job.key);
+      backlog = backlog.filter((b) => b !== id);
+      if (job.worker) { job.worker.pending = Math.max(0, job.worker.pending - 1); if (!byWorker.has(job.worker)) byWorker.set(job.worker, []); byWorker.get(job.worker).push(id); }
+      job.reject(Object.assign(new Error("cancelled"), { cancelled: true }));
+    }
+    for (const [w, ids] of byWorker) w.w.postMessage({ type: "cancel", ids });
+    pump();
+  }
+
+  return {
+    load, get, cancel, isCached,
+    get loaded() { return loaded; },
+    get progress() { return progress; },
+    onProgress(f) { listeners.add(f); return () => listeners.delete(f); },
+    warm() { if (!loadPromise) load().catch(() => {}); },
+  };
+})();
+
+function packProgressText(p) {
+  if (p.phase === "download") return `Downloading voice pack… ${Math.floor(p.frac * 100)}% (first time only)`;
+  if (p.phase === "start") return "Starting the voice…";
+  return "";
+}
+function friendlyEngineError(err) {
+  const m = String(err?.message || err);
+  if (/Download failed|Failed to fetch|NetworkError|network/i.test(m)) return "The voice pack could not download. Check your connection and try again.";
+  if (/memory|allocation|OOM/i.test(m)) return "This device ran out of memory loading the voice. Try closing other tabs.";
+  return "The natural voice could not start in this browser. Try Chrome or Edge.";
+}
+Engine.onProgress((p) => {
+  if (p.phase === "ready") el.packNote.textContent = "Voice pack loaded and ready.";
+  else if (p.phase === "download") el.packNote.textContent = `Downloading voice pack… ${fmtMB(p.got || 0)} of ${fmtMB(PACK_TOTAL)}`;
+  else if (p.phase === "start") el.packNote.textContent = "Starting the voice…";
+  else if (p.phase === "error") el.packNote.textContent = friendlyEngineError(p.error);
+});
+
+/* ---------------- natural voice reading session ---------------- */
+const gapBefore = (parts, i, first, speed) => (i === first ? 0 : (parts[i].pi !== parts[i - 1].pi ? 0.55 : 0.2) / speed);
+function flatten(plan) {
+  const out = [];
+  plan.forEach((p, pi) => p.parts.forEach((text) => out.push({ text, pi })));
+  return out;
+}
+
+let audioCtx = null, analyser = null;
+function ensureAudio() {
+  if (!audioCtx) {
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch {}
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AC();
+    analyser = audioCtx.createAnalyser(); analyser.fftSize = 512;
+    analyser.connect(audioCtx.destination);
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  return audioCtx;
+}
+
+class NaturalSession {
+  constructor(plan, start, voiceId, speed) {
+    this.kind = "natural";
+    this.plan = plan; this.parts = flatten(plan); this.first = Math.min(start, this.parts.length - 1);
+    this.voiceId = voiceId; this.speed = speed;
+    this.audio = []; this.times = []; this.sources = [];
+    this.next = this.first; this.cursor = 0; this.current = this.first;
+    this.ended = false; this.paused = false; this.owner = Symbol("play");
+    this.levels = new Uint8Array(512);
+  }
+  position() { return { part: this.current }; }
+  async start() {
+    const ctx = ensureAudio();
+    showReader(this.plan, "natural");
+    markPart(this.current);
+    setPlayIcon(true); el.stop.disabled = false;
+    if (!Engine.loaded) {
+      const off = Engine.onProgress((p) => { if (!this.ended && (p.phase === "download" || p.phase === "start")) { setStatus(packProgressText(p)); setSub(""); setTrack(p.frac, true); } });
+      setStatus(packProgressText(Engine.progress) || "Getting the voice ready…"); setTrack(Engine.progress.frac || 0, true);
+      try { await Engine.load(); } catch (err) { off(); if (!this.ended) this.fail(friendlyEngineError(err)); return; }
+      off();
+      if (this.ended) return;
+    }
+    setStatus("Getting the first sentence ready…"); setTrack(0);
+    this.cursor = ctx.currentTime;
+    for (let i = this.first; i < this.parts.length; i++) {
+      Engine.get(this.parts[i].text, this.voiceId, this.speed, this.owner)
+        .then((a) => { if (!this.ended) { this.audio[i] = a; this.schedule(); } })
+        .catch((err) => { if (!this.ended && !err.cancelled) { this.audio[i] = new Float32Array(0); this.schedule(); console.warn(err); } });
+    }
+    this.loop();
+  }
+  schedule() {
+    const ctx = audioCtx;
+    while (this.next < this.parts.length && this.audio[this.next]) {
+      const i = this.next, a = this.audio[i];
+      const startAt = Math.max(this.cursor + gapBefore(this.parts, i, this.first, this.speed), ctx.currentTime + 0.06);
+      let dur = 0;
+      if (a.length) {
+        const buf = ctx.createBuffer(1, a.length, SAMPLE_RATE);
+        buf.copyToChannel(a, 0);
+        const src = ctx.createBufferSource(); src.buffer = buf; src.connect(analyser);
+        src.start(startAt); this.sources.push(src);
+        dur = a.length / SAMPLE_RATE;
+        src.onended = () => { const j = this.sources.indexOf(src); if (j >= 0) this.sources.splice(j, 1); };
+      }
+      this.times[i] = [startAt, startAt + dur];
+      this.cursor = startAt + dur;
+      this.next++;
+    }
+  }
+  loop() {
+    if (this.ended) return;
+    const now = audioCtx.currentTime, total = this.parts.length - this.first;
+    let cur = this.first;
+    for (let i = this.first; i < this.next; i++) if (this.times[i][0] <= now + 0.02) cur = i;
+    const scheduledAll = this.next >= this.parts.length;
+    const waiting = !scheduledAll && now >= this.cursor - 0.02;
+    if (waiting && !this.wasWaiting && this.next > this.first) this.waits = (this.waits || 0) + 1;
+    this.wasWaiting = waiting;
+    if (this.next > this.first) {
+      if (cur !== this.current || !lastMarked) { this.current = cur; if (!document.hidden) markPart(cur); }
+      if (this.paused) setStatus("Paused");
+      else if (waiting) setStatus("Getting the next sentence ready…");
+      else setStatus(`Reading sentence ${cur + 1} of ${this.parts.length}`);
+      setSub(this.waits >= 2
+        ? "Tip: for smooth listening, make an audio file below and play that"
+        : `${VOICES.find((v) => v.id === this.voiceId).name} voice · ${this.speed.toFixed(1)}×`);
+      setTrack((cur - this.first + Math.min(1, Math.max(0, (now - this.times[cur][0]) / Math.max(0.01, this.times[cur][1] - this.times[cur][0])))) / total);
+    }
+    if (!document.hidden && !this.paused && now < this.cursor && this.next > this.first) {
+      analyser.getByteTimeDomainData(this.levels);
+      let sum = 0; for (let i = 0; i < this.levels.length; i++) { const x = (this.levels[i] - 128) / 128; sum += x * x; }
+      const rms = Math.min(1, Math.sqrt(sum / this.levels.length) * 4.5);
+      setMeter("live", [0.55, 0.85, 1, 0.75, 0.5].map((m, i) => Math.min(1, rms * m * (0.8 + 0.4 * Math.abs(Math.sin(now * (5 + i)))))));
+    } else setMeter(this.paused ? "" : (waiting ? "" : "live"), [0, 0, 0, 0, 0]);
+    if (scheduledAll && now >= this.cursor + 0.05) { this.finish(); return; }
+    // animation frames pause in a background tab, so tick with a timer there (the audio itself is already queued)
+    this.raf = document.hidden ? setTimeout(() => this.loop(), 250) : requestAnimationFrame(() => this.loop());
+  }
+  toggle() {
+    if (this.paused) { this.paused = false; audioCtx.resume(); setPlayIcon(true); }
+    else { this.paused = true; audioCtx.suspend(); setPlayIcon(false); setStatus("Paused"); }
+  }
+  cleanup() {
+    this.ended = true; cancelAnimationFrame(this.raf); clearTimeout(this.raf);
+    this.sources.forEach((s) => { try { s.stop(); } catch {} });
+    this.sources = [];
+    Engine.cancel(this.owner);
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+  }
+  stop() { this.cleanup(); }
+  finish() { this.cleanup(); clearResume(); endSession("Finished. Press play to hear it again."); }
+  fail(msg) { const pos = this.position(); this.cleanup(); setResume(pos); endSession(msg, true); }
+}
+
+/* ---------------- instant (Claude) voice reading session ---------------- */
+function claudeLines(plan) {
+  const lines = [];
+  plan.forEach((p, pi) => {
+    let buf = "";
+    for (const part of p.parts) {
+      if (buf && buf.length + 1 + part.length > 1800) { lines.push({ text: buf, pi }); buf = part; }
+      else buf = buf ? buf + " " + part : part;
+    }
+    if (buf) lines.push({ text: buf, pi });
+  });
+  return lines.map((l, i) => ({ ...l, id: "l" + i }));
+}
+
+class ClaudeSession {
+  constructor(tts, plan, startPara, voice, rate) {
+    this.kind = "claude"; this.t = tts; this.plan = plan; this.voice = voice; this.rate = rate;
+    this.lines = claudeLines(plan);
+    const fi = this.lines.findIndex((l) => l.pi >= startPara);
+    this.first = fi < 0 ? 0 : fi; this.queued = this.first; this.currentLine = this.first;
+    this.ended = false; this.paused = false;
+  }
+  position() { return { para: this.lines[this.currentLine]?.pi ?? 0 }; }
+  batch(n) {
+    const out = this.lines.slice(this.queued, this.queued + n).map(({ text, id }) => ({ text, id }));
+    this.queued += out.length; return out;
+  }
+  start() {
+    // must run straight from the click: no awaits before speak()
+    showReader(this.plan, "claude");
+    markPart(this.lines[this.first].pi, true);
+    setPlayIcon(true); el.stop.disabled = false;
+    setStatus("Starting…"); setSub(`${CLAUDE_VOICES.find((v) => v.id === this.voice).name} voice · instant`); setTrack(0);
+    setMeter("pulse");
+    this.t.speak(this.batch(100), { voice: this.voice, rate: this.rate })
+      .catch((err) => this.onError(err));
+  }
+  onLine({ id }) {
+    if (this.ended) return;
+    const i = this.lines.findIndex((l) => l.id === id);
+    if (i < 0) return;
+    this.currentLine = i;
+    markPart(this.lines[i].pi, true);
+    setStatus(`Reading paragraph ${this.lines[i].pi + 1} of ${this.plan.length}`);
+    setTrack((i - this.first) / Math.max(1, this.lines.length - this.first));
+    if (this.queued < this.lines.length && this.queued - i < 30) this.t.add(this.batch(50)).catch(() => {});
+  }
+  onState({ state: st, reason }) {
+    if (this.ended) return;
+    if (st === "speaking") { this.paused = false; setPlayIcon(true); setMeter("pulse"); }
+    else if (st === "paused") { this.paused = true; setPlayIcon(false); setMeter(""); setStatus("Paused"); }
+    else if (st === "idle") {
+      if (reason === "completed") { this.ended = true; setTrack(1); clearResume(); endSession("Finished. Press play to hear it again."); }
+      else if (reason === "replaced" || reason === "stopped") { /* handled by whoever replaced or stopped it */ }
+      else this.onError({ code: "stopped", reason });
+    }
+  }
+  onError(err) {
+    if (this.ended) return;
+    const code = err?.code, reason = err?.reason;
+    if (code === "stopped" && (reason === "replaced" || reason === "stopped")) return;
+    this.ended = true;
+    const r = setResume(this.position());
+    const carry = r ? ` Press play to carry on from sentence ${r.part + 1}.` : " Press play to start again.";
+    const msgs = {
+      viewer_stopped: r ? resumeText(r) : "Stopped.",
+      hidden: `Instant voices stop when you switch pages.${carry} To keep listening in the background, pick a natural voice.`,
+      interrupted: `Stopped by something else on the page.${carry}`,
+      time_limit: `Stopped after a long pause.${carry}`,
+      no_gesture: "Press play to start.",
+      busy: "Finish dictating first, then press play.",
+      rate_limited: "The instant voices have read a lot for now. Try again later, or pick a natural voice.",
+      not_granted: "Instant voices are turned off for this page. Turn them back on in its Permissions menu, or pick a natural voice.",
+      unavailable: "Instant voices aren't available right now. Pick a natural voice instead.",
+      upstream_error: `The voice stopped unexpectedly.${carry}`,
+      invalid_argument: "That text could not be read. Try a shorter piece.",
+    };
+    const key = code === "stopped" ? reason : code;
+    endSession(msgs[key] || msgs.upstream_error, !["viewer_stopped", "no_gesture", "hidden", "interrupted", "time_limit"].includes(key));
+    if (r) setTrack(r.part / r.total);
+    if (code === "not_granted" || code === "unavailable" || reason === "not_granted" || reason === "unavailable") disableInstant();
+  }
+  toggle() {
+    if (this.paused) this.t.resume().catch((e) => this.onError(e));
+    else this.t.pause().catch((e) => this.onError(e));
+  }
+  setRate(r) { this.rate = r; this.t.setRate?.(r)?.catch?.(() => {}); }
+  stop() { this.ended = true; this.t.stop().catch(() => {}); }
+}
+function disableInstant() {
+  document.querySelectorAll('#instant-voices input').forEach((i) => { i.disabled = true; });
+  if (state.voice?.startsWith("c:")) { state.voice = "n:" + state.lastNatural; syncVoiceUI(); }
+}
+
+/* ---------------- start / stop ---------------- */
+function startReading(pos = { part: 0 }) {
+  const text = getText();
+  if (!text) { setStatus("Paste some text first.", true); el.text.focus(); return; }
+  const plan = planReading(text);
+  if (!plan.length) { setStatus("There is nothing to read in that text.", true); return; }
+  const v = currentVoice();
+  const parts = flatten(plan);
+  const instant = v.startsWith("c:") && state.tts;
+  const old = state.session;
+  if (old && !old.ended) {
+    // a new instant reading replaces an old one by itself; anything else is stopped first
+    if (old.kind === "claude" && instant) old.ended = true; else old.stop();
+  }
+  lastMarked = null;
+  el.restart.hidden = true;
+  if (instant) {
+    const pi = pos.para ?? parts[pos.part ?? 0]?.pi ?? 0;
+    const s = new ClaudeSession(state.tts, plan, pi, v.slice(2), state.speed);
+    state.session = s; s.start();
+  } else {
+    let k = pos.part ?? parts.findIndex((p) => p.pi === pos.para);
+    if (!(k >= 0 && k < parts.length)) k = 0;
+    const s = new NaturalSession(plan, k, v.slice(2), state.speed);
+    state.session = s; s.start();
+  }
+}
+function endSession(msg, bad = false) {
+  state.session = null;
+  setPlayIcon(false); el.stop.disabled = true; setMeter("");
+  hideReader();
+  setStatus(msg, bad); setSub(""); if (!bad) setTrack(0);
+}
+function stopReading() {
+  const s = state.session;
+  if (!s) return;
+  const pos = s.ended ? null : s.position();
+  s.stop();
+  const r = setResume(pos);
+  endSession(r ? resumeText(r) : "Stopped.");
+  if (r) setTrack(r.part / r.total); else setTrack(0);
+}
+el.play.addEventListener("click", () => {
+  const s = state.session;
+  if (s && !s.ended) {
+    // a natural session still loading its voice pack has nothing to pause yet
+    if (s.kind === "natural" && s.next === s.first) return;
+    s.toggle(); return;
+  }
+  const r = validResume();
+  startReading(r ? { part: r.part } : { part: 0 });
+});
+el.restart.addEventListener("click", () => { clearResume(); startReading({ part: 0 }); });
+el.stop.addEventListener("click", stopReading);
+document.addEventListener("visibilitychange", () => {
+  const s = state.session;
+  if (!document.hidden && s?.kind === "natural" && !s.ended) { cancelAnimationFrame(s.raf); clearTimeout(s.raf); markPart(s.current); s.loop(); }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.session?.kind === "natural" && document.activeElement !== el.text) stopReading();
+});
+
+/* ---------------- save as audio ---------------- */
+let saveJob = null, savedBlob = null, savedName = "", savedUrl = null;
+function saveMsg(msg, bad = false) { el.saveStatus.textContent = msg; el.saveStatus.classList.toggle("bad", bad); }
+function saveBar(frac) { el.saveBar.hidden = frac == null; if (frac != null) el.saveBar.firstElementChild.style.width = `${frac * 100}%`; }
+function resetSaved() {
+  if (saveJob) return;
+  if (savedUrl) URL.revokeObjectURL(savedUrl);
+  savedBlob = null; savedUrl = null; el.saveAudio.hidden = true; el.saveAudio.removeAttribute("src"); el.saveAgainRow.hidden = true;
+  if (!el.saveStatus.classList.contains("bad")) saveMsg("");
+}
+function fileNameFor(text, ext) {
+  const words = text.replace(/[^\p{L}\p{N}\s-]/gu, " ").trim().split(/\s+/).slice(0, 6).join("-").toLowerCase();
+  return `${words || "speech"}.${ext}`;
+}
+
+async function encodeAudio(pcm24, onStep) {
+  // resample to 48 kHz, which every encoder accepts
+  const frames48 = Math.ceil(pcm24.length * 2);
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const oac = new OAC(1, frames48, 48000);
+  const src = oac.createBufferSource();
+  const b = oac.createBuffer(1, pcm24.length, SAMPLE_RATE); b.copyToChannel(pcm24, 0);
+  src.buffer = b; src.connect(oac.destination); src.start();
+  const pcm = (await oac.startRendering()).getChannelData(0);
+
+  if ("AudioEncoder" in window && "AudioData" in window) {
+    const aac = { codec: "mp4a.40.2", sampleRate: 48000, numberOfChannels: 1, bitrate: 128000 };
+    const opus = { codec: "opus", sampleRate: 48000, numberOfChannels: 1, bitrate: 96000 };
+    let cfg = null, kind = null;
+    try { if ((await AudioEncoder.isConfigSupported(aac)).supported) { cfg = aac; kind = "mp4"; } } catch {}
+    if (!cfg) { try { if ((await AudioEncoder.isConfigSupported(opus)).supported) { cfg = opus; kind = "webm"; } } catch {} }
+    if (cfg) {
+      const muxer = kind === "mp4"
+        ? new Mp4Muxer.Muxer({ target: new Mp4Muxer.ArrayBufferTarget(), audio: { codec: "aac", numberOfChannels: 1, sampleRate: 48000 }, fastStart: "in-memory" })
+        : new WebMMuxer.Muxer({ target: new WebMMuxer.ArrayBufferTarget(), audio: { codec: "A_OPUS", numberOfChannels: 1, sampleRate: 48000 } });
+      let encErr = null;
+      const enc = new AudioEncoder({ output: (chunk, meta) => muxer.addAudioChunk(chunk, meta), error: (e) => { encErr = e; } });
+      enc.configure(cfg);
+      const step = 48000; // one second per frame batch
+      for (let o = 0; o < pcm.length; o += step) {
+        const n = Math.min(step, pcm.length - o);
+        const data = new AudioData({ format: "f32-planar", sampleRate: 48000, numberOfFrames: n, numberOfChannels: 1, timestamp: Math.round(o / 48000 * 1e6), data: pcm.slice(o, o + n) });
+        enc.encode(data); data.close();
+        if (o % (step * 20) === 0) { onStep?.(o / pcm.length); await sleep(0); }
+        if (encErr) throw encErr;
+      }
+      await enc.flush(); enc.close();
+      if (encErr) throw encErr;
+      muxer.finalize();
+      const mime = kind === "mp4" ? "audio/mp4" : "audio/webm";
+      return { blob: new Blob([muxer.target.buffer], { type: mime }), ext: kind };
+    }
+  }
+  // fallback: record in real time (older browsers)
+  if (!("MediaRecorder" in window)) throw new Error("This browser can't make audio files. Try Chrome or Edge.");
+  const types = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"];
+  const mime = types.find((t) => MediaRecorder.isTypeSupported?.(t));
+  if (!mime) throw new Error("This browser can't make audio files. Try Chrome or Edge.");
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC({ sampleRate: 48000 });
+  const dest = ctx.createMediaStreamDestination();
+  const buf = ctx.createBuffer(1, pcm.length, 48000); buf.copyToChannel(pcm, 0);
+  const s = ctx.createBufferSource(); s.buffer = buf; s.connect(dest);
+  const rec = new MediaRecorder(dest.stream, { mimeType: mime }); const chunks = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const done = new Promise((r) => { rec.onstop = r; });
+  rec.start(1000); s.start();
+  const t0 = ctx.currentTime, dur = buf.duration;
+  const tick = setInterval(() => onStep?.(Math.min(1, (ctx.currentTime - t0) / dur), true), 500);
+  await new Promise((r) => { s.onended = r; });
+  clearInterval(tick); rec.stop(); await done; ctx.close();
+  return { blob: new Blob(chunks, { type: mime.split(";")[0] }), ext: mime.includes("mp4") ? "mp4" : "webm" };
+}
+
+async function offerFile() {
+  if (!savedBlob) return;
+  if (!state.downloads) {
+    if (!window.claude) {
+      // running on its own (a normal website, not inside Claude): use a plain download link
+      const a = document.createElement("a");
+      a.href = savedUrl; a.download = savedName; document.body.appendChild(a); a.click(); a.remove();
+      saveMsg(`Saved ${savedName} to your downloads.`);
+      el.saveAgainRow.hidden = false;
+      return;
+    }
+    saveMsg("Your audio is ready to play above. Saving files isn't available in this view: open this page on claude.ai in Chrome or Edge to save it.", true);
+    return;
+  }
+  try {
+    await state.downloads.save({ filename: savedName, data: savedBlob });
+    saveMsg(`Saved ${savedName}.`);
+  } catch (err) {
+    const c = err?.code;
+    if (c === "declined") saveMsg("Not saved. Press “Save file again” when you're ready.");
+    else if (c === "rate_limited") saveMsg("Wait a moment, then press “Save file again”.");
+    else if (c === "rejected_extension" || c === "extension_not_enabled") saveMsg("This file type can't be saved here. You can still play it above.", true);
+    else saveMsg("Saving isn't available right now. You can still play it above.", true);
+  }
+  el.saveAgainRow.hidden = false;
+}
+el.saveAgain.addEventListener("click", offerFile);
+
+el.make.addEventListener("click", async () => {
+  const text = getText();
+  if (!text) { saveMsg("Paste some text first.", true); return; }
+  resetSaved();
+  const voiceId = naturalForSave(), speed = state.speed;
+  const plan = planReading(text), parts = flatten(plan);
+  const job = { owner: Symbol("save"), cancelled: false };
+  saveJob = job;
+  el.make.disabled = true; el.makeCancel.hidden = false; saveBar(0);
+  try {
+    if (!Engine.loaded) {
+      const off = Engine.onProgress((p) => { if (!job.cancelled && (p.phase === "download" || p.phase === "start")) { saveMsg(packProgressText(p)); saveBar(p.frac); } });
+      saveMsg(packProgressText(Engine.progress) || "Getting the voice ready…");
+      try { await Engine.load(); } finally { off(); }
+    }
+    if (job.cancelled) return;
+    let done = 0;
+    const t0 = performance.now();
+    saveMsg(`Making audio… sentence 0 of ${parts.length}`); saveBar(0);
+    const audio = await Promise.all(parts.map((p) => Engine.get(p.text, voiceId, speed, job.owner, 1).then((a) => {
+      done++;
+      if (!job.cancelled) {
+        const left = (performance.now() - t0) / done * (parts.length - done) / 1000;
+        saveMsg(`Making audio… sentence ${done} of ${parts.length}${done > 2 && left > 5 ? ` · about ${fmtTime(left)} left` : ""}`);
+        saveBar(done / parts.length * 0.95);
+      }
+      return a;
+    })));
+    if (job.cancelled) return;
+    // join with natural pauses
+    const gaps = parts.map((_, i) => Math.round(gapBefore(parts, i, 0, speed) * SAMPLE_RATE));
+    const lead = Math.round(0.3 * SAMPLE_RATE), tail = Math.round(0.6 * SAMPLE_RATE);
+    const total = lead + tail + audio.reduce((t, a, i) => t + a.length + gaps[i], 0);
+    const pcm = new Float32Array(total); let o = lead;
+    audio.forEach((a, i) => { o += gaps[i]; pcm.set(a, o); o += a.length; });
+    saveMsg("Packing the audio file…");
+    const { blob, ext } = await encodeAudio(pcm, (f, realtime) => { if (!job.cancelled) { saveBar(0.95 + f * 0.05); if (realtime) saveMsg(`Recording the file… ${Math.round(f * 100)}% (this browser records in real time)`); } });
+    if (job.cancelled) return;
+    savedBlob = blob; savedName = fileNameFor(text, ext);
+    savedUrl = URL.createObjectURL(blob);
+    el.saveAudio.src = savedUrl; el.saveAudio.hidden = false;
+    saveBar(null);
+    saveMsg(`Ready: ${fmtTime(total / SAMPLE_RATE)} of audio, ${fmtMB(blob.size)}. Saving…`);
+    saveJob = null;
+    await offerFile();
+  } catch (err) {
+    if (!job.cancelled) { saveBar(null); saveMsg(err?.cancelled ? "Cancelled." : (Engine.loaded ? (err?.message || "Something went wrong making the file.") : friendlyEngineError(err)), true); console.warn(err); }
+  } finally {
+    if (saveJob === job) saveJob = null;
+    el.make.disabled = false; el.makeCancel.hidden = true;
+  }
+});
+el.makeCancel.addEventListener("click", () => {
+  if (!saveJob) return;
+  saveJob.cancelled = true; Engine.cancel(saveJob.owner); saveJob = null;
+  el.make.disabled = false; el.makeCancel.hidden = true; saveBar(null); saveMsg("Cancelled.");
+});
+
+/* ---------------- start up ---------------- */
+syncSpeed(); syncVoiceUI(); updateStats();
+{ const r = validResume(); if (r) { setStatus(`Last time you stopped at sentence ${r.part + 1} of ${r.total}. Press play to carry on.`); setTrack(r.part / r.total); el.restart.hidden = false; } else if (state.resume) clearResume(); }
+// if the voice pack is already saved in this browser, get it ready quietly
+Engine.isCached().then((yes) => { if (yes && !Engine.loaded && Engine.progress.phase === "idle") el.packNote.textContent = "Voice pack saved in this browser."; });
+
+// light up the instant voices and file saving when the page is opened inside Claude
+(async () => {
+  const use = (name) => (window.claude?.use ? window.claude.use(name).catch(() => null) : Promise.resolve(null));
+  const wait = async () => { for (let i = 0; i < 60 && !window.claude?.use; i++) await sleep(50); };
+  await wait();
+  const [tts, downloads] = await Promise.all([use("tts"), use("downloads")]);
+  state.downloads = downloads;
+  if (tts) {
+    state.tts = tts;
+    el.instantGroup.hidden = false;
+    tts.onLine((e) => { if (state.session?.kind === "claude") state.session.onLine(e); });
+    tts.onState((e) => { if (state.session?.kind === "claude") state.session.onState(e); });
+    tts.setRate?.(state.speed)?.catch?.(() => {});
+  }
+  syncVoiceUI();
+  if (currentVoice().startsWith("n:")) Engine.isCached().then((yes) => yes && Engine.warm());
+})();
+</script>
+</body>
+</html>
